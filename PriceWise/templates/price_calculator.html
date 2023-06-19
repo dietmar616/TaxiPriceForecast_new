@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Price Calculator</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.7.1/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css">
+    <style>
+        body, html {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+
+        #map {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 0;
+        }
+
+        #price-container {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            z-index: 1;
+            background-color: #eee;
+            padding: 10px;
+            color: #333;
+        }
+
+        #calculate-price-btn {
+            margin-bottom: 10px;
+        }
+
+        #price-info {
+            font-weight: bold;
+        }
+        .start-marker-icon, .end-marker-icon {
+            background-color: rgba(0, 0, 255, 0.6);
+        }
+
+        #save-btn {
+            margin-top: 10px;
+        }
+
+        .toggle-container {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background-color: #fff;
+            padding: 10px;
+            border-radius: 4px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+            z-index: 1;
+        }
+
+        .toggle-label {
+            display: inline-block;
+            margin-right: 8px;
+        }
+
+        #sidebar {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 300px;
+            height: 100%;
+            background-color: #f9f9f9;
+            overflow: auto;
+            transition: all 0.3s;
+            transform: translateX(-100%);
+            z-index: 1;
+        }
+
+        #sidebar.active {
+            transform: translateX(0);
+        }
+
+        #toggle-sidebar {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 1;
+        }
+
+        #add-driver-form {
+            padding: 10px;
+        }
+
+        #driver-select {
+            width: 100%;
+            padding: 5px;
+        }
+        input, select {
+            /* Add your input styles here */
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 2px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+
+        #add-driver-btn {
+            width: 100%;
+            padding: 10px;
+            margin-top: 10px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        #close-sidebar {
+            position: absolute;
+            right: 10px;
+            top: 10px;
+            border: none;
+            background: none;
+            font-size: 20px;
+            cursor: pointer;
+        }
+        #show-predictions-btn {
+            width: 100%;
+            padding: 10px;
+            margin-top: 20px; 
+            background-color: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div id="price-container">
+        <div id="price-info"></div>
+        <button id="save-btn" disabled>Save</button>
+    </div>
+    <div class="toggle-container">
+        <label for="polygon-toggle" class="toggle-label">Toggle Polygon</label>
+        <input type="checkbox" id="polygon-toggle" />
+    </div>
+    <button id="toggle-sidebar">☰</button>
+
+    <div id="sidebar">
+        <button id="close-sidebar">x</button>
+        <h3>Select Driver</h3>
+        <select id="driver-select">
+            
+        </select>
+        <h3>Add Driver</h3>
+        <form id="add-driver-form">
+            <input type="text" id="name-input" placeholder="Name" required>
+            <input type="text" id="car-brand-input" placeholder="Car Brand" required>
+            <input type="text" id="car-model-input" placeholder="Car Model" required>
+            <input type="text" id="fuel-consumption-input" placeholder="Fuel Consumption" required>
+            <select id="fuel-type" required> 
+                <option value="" disabled selected>Fuel Type</option>
+                <option value="Бензин">Бензин</option>
+                <option value="Дизель">Дизель</option>
+                <option value="Газ">Газ</option>
+            </select>
+            <select id="comfort-level" required>
+                <option value="" disabled selected>Comfort Level</option>
+                <option value="Економ">Економ</option>
+                <option value="Стандарт">Стандарт</option>
+                <option value="Зручний">Зручний</option>
+            </select>
+            
+            <button type="submit" id="add-driver-btn">Add Driver</button>
+        </form>
+        <button type="button" id="show-predictions-btn" class="btn btn-primary show-predictions-btn">Show Predictions</button>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script>
+        // Function to get the CSRF token from cookies
+        function getCSRFToken() {
+            var cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                var cookies = document.cookie.split(';');
+                for (var i = 0; i < cookies.length; i++) {
+                    var cookie = cookies[i].trim();
+                    // Get the name of the cookie and check if it starts with 'csrftoken'
+                    if (cookie.substring(0, 10) === 'csrftoken=') {
+                        cookieValue = decodeURIComponent(cookie.substring(10));
+                        break;
+                    }
+                }
+            }
+            return cookieValue;
+        }
+
+        // Ініціалізація карти
+        var map = L.map('map').setView([49.41967, 26.98785], 13);
+
+        // Додавання підкладки (тайлового шару) з OpenStreetMap
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: 'Map data &copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a> contributors',
+            maxZoom: 18,
+        }).addTo(map);
+
+        var routeLayer;
+        var polygonGroup = L.featureGroup().addTo(map);
+
+        // Додавання полігону з заданим ідентифікатором на карту
+        fetch('https://nominatim.openstreetmap.org/search?q=Хмельницький&format=json&polygon_geojson=1')
+            .then(response => response.json())
+            .then(data => {
+                var cityPolygonCoords = data[0].geojson.coordinates[0].map(function(coord) {
+                    return [coord[1], coord[0]];
+                });
+                var polygon = L.polygon(cityPolygonCoords, { color: 'rgba(0, 0, 255, 0.3)' }).addTo(polygonGroup);
+            })
+            .catch(error => {
+                console.error('Error:', error);
+            });
+
+        // Функція для відправки запиту на обчислення ціни та отримання маршруту
+        function calculatePrice() {
+            var startLocation = startMarker.getLatLng();
+            var endLocation = endMarker.getLatLng();
+
+            var startLatitude = startLocation.lat.toFixed(6);
+            var startLongitude = startLocation.lng.toFixed(6);
+            var endLatitude = endLocation.lat.toFixed(6);
+            var endLongitude = endLocation.lng.toFixed(6);
+            
+            var driver_id = document.getElementById('driver-select').value;
+            var csrfToken = getCSRFToken();
+
+            var xhr = new XMLHttpRequest();
+            xhr.open('POST', '/calculate_price/', true);
+            xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+            xhr.setRequestHeader('X-CSRFToken', csrfToken);
+            xhr.onreadystatechange = function() {
+                if (xhr.readyState === XMLHttpRequest.DONE) {
+                    if (xhr.status === 200) {
+                        var response = JSON.parse(xhr.responseText);
+                        var price = response.price;
+                        var distance = response.distance;
+
+                        document.getElementById('price-info').textContent = 'Price: ' + price.toFixed(2) + ' UAH';
+
+                        // Видалення попереднього шару маршруту, якщо він існує
+                        if (routeLayer) {
+                            map.removeLayer(routeLayer);
+                        }
+
+                        if (response.route) {
+                            // Додавання нового шару маршруту
+                            routeLayer = L.geoJSON(response.route, { style: { color: 'green' } }).addTo(map);
+                            document.getElementById('save-btn').disabled = false;
+                            document.getElementById('save-btn').onclick = function() {
+                                saveTrip(startLatitude, startLongitude, endLatitude, endLongitude, distance, driver_id, price);
+                            };
+                        } else {
+                            console.error('Invalid route data');
+                        }
+
+                    } else {
+                        console.error('Error:', xhr.status);
+                    }
+                }
+            };
+            xhr.send('driver_id=' + driver_id + '&start_latitude=' + startLatitude + '&start_longitude=' + startLongitude + '&end_latitude=' + endLatitude + '&end_longitude=' + endLongitude);
+        }
+
+        // Функція для збереження маршруту в базу даних
+        function saveTrip(startLatitude, startLongitude, endLatitude, endLongitude, distance, driver_id, price) {
+            var csrfToken = getCSRFToken();
+
+            var xhr = new XMLHttpRequest();
+            xhr.open('POST', '/save_trip/', true);
+            xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+            xhr.setRequestHeader('X-CSRFToken', csrfToken);
+            xhr.onreadystatechange = function() {
+                if (xhr.readyState === XMLHttpRequest.DONE) {
+                    if (xhr.status === 200) {
+                        console.log('Trip saved in the database');
+                        document.getElementById('save-btn').disabled = true;
+                    } else {
+                        console.error('Error:', xhr.status);
+                    }
+                }
+            };
+            xhr.send('driver_id=' + driver_id +'&start_latitude=' + startLatitude + '&start_longitude=' + startLongitude + '&end_latitude=' + endLatitude + '&end_longitude=' + endLongitude + '&distance=' + distance + '&price=' + price);
+        }
+
+        // Ініціалізація початкових маркерів та обробників подій
+        var startMarker = L.marker([49.41967, 26.98785], { draggable: true }).addTo(map);
+        startMarker.bindTooltip('Початкова точка', { permanent: true, direction: 'right' });
+        startMarker.getTooltip().getElement().style.backgroundColor = 'rgba(255, 255, 255, 0.3)';
+
+        var endMarker = L.marker([49.40984, 27.00059], { draggable: true }).addTo(map);
+        endMarker.bindTooltip('Кінцева точка', { permanent: true, direction: 'right' });
+        endMarker.getTooltip().getElement().style.backgroundColor = 'rgba(255, 255, 255, 0.3)';
+
+        startMarker.on('dragend', calculatePrice);
+        endMarker.on('dragend', calculatePrice);
+
+        // Додавання обробників подій для перемикача полігону
+        map.removeLayer(polygonGroup);
+        document.getElementById('polygon-toggle').addEventListener('change', function(event) {
+            if (event.target.checked) {
+                map.addLayer(polygonGroup);
+            } else {
+                map.removeLayer(polygonGroup);
+            }
+        });
+        document.addEventListener('DOMContentLoaded', function() {
+            loadDrivers();
+        });
+        
+        document.getElementById('driver-select').addEventListener('change', function() {
+            calculatePrice();
+            document.getElementById('save-btn').disabled = false;
+        });
+        document.getElementById('show-predictions-btn').addEventListener('click', function() {
+            window.location.href = '/predictions_page/';
+        });
+        document.getElementById('toggle-sidebar').addEventListener('click', function() {
+            document.getElementById('sidebar').classList.toggle('active');
+        });
+        document.getElementById('close-sidebar').addEventListener('click', function() {
+            document.getElementById('sidebar').classList.remove('active');
+        });
+
+        document.getElementById('add-driver-form').addEventListener('submit', function(event) {
+            event.preventDefault();
+            
+            var name = document.getElementById('name-input').value;
+            var carBrand = document.getElementById('car-brand-input').value;
+            var carModel = document.getElementById('car-model-input').value;
+            var fuel_consumption = document.getElementById('fuel-consumption-input').value;
+            var fuel_type = document.getElementById('fuel-type').value;
+            var comfort_level = document.getElementById('comfort-level').value;
+
+            addDriver(name, carBrand, carModel, fuel_consumption, fuel_type, comfort_level);
+        });
+
+        function addDriver(name, car_brand, car_model, fuel_consumption, fuel_type, comfort_level) {
+            var csrfToken = getCSRFToken();
+
+            var xhr = new XMLHttpRequest();
+            xhr.open('POST', '/add_driver/', true);
+            xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+            xhr.setRequestHeader('X-CSRFToken', csrfToken);
+            xhr.onreadystatechange = function() {
+                if (xhr.readyState === XMLHttpRequest.DONE) {
+                    if (xhr.status === 200) {
+                        console.log('Driver added to the database');
+                        document.getElementById('name-input').value = '';
+                        document.getElementById('car-brand-input').value = '';
+                        document.getElementById('car-model-input').value = '';
+                        document.getElementById('fuel-consumption-input').value = '';
+                        document.getElementById('fuel-type').value = '';
+                        document.getElementById('comfort-level').value = '';
+                        loadDrivers();
+                    } else {
+                        console.error('Error:', xhr.status);
+                    }
+                }
+            };
+            xhr.send('name=' + name + '&car_brand=' + car_brand + '&car_model=' + car_model + '&fuel_consumption=' + fuel_consumption +'&fuel_type=' + fuel_type + '&comfort_level=' + comfort_level);
+        }
+
+        function loadDrivers() {
+            fetch('/loadDrivers/')  // використовуйте правильний URL для вашого Django-ендпоїнта
+                .then(response => response.json())
+                .then(data => {
+                    var select = document.getElementById('driver-select');
+                    select.innerHTML = '';
+                    data.drivers.forEach(function(driver) {
+                        var option = document.createElement('option');
+                        option.value = driver.id;
+                        option.text = driver.name + ' (' + driver.car_brand + ' ' + driver.car_model + '). ' + driver.comfort_level;
+                        select.appendChild(option);
+                    });
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                });
+        }
+        loadDrivers();
+    </script>
+</body>
+</html>

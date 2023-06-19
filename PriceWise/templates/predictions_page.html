@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Predictions</title>
+    <script src="https://code.highcharts.com/highcharts.js"></script>
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css">
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+</head>
+<body>
+    <h1>Revenue Predictions</h1>
+    <button id="create-df-btn" class="btn btn-primary">Prepare Data</button>
+    <button id="get-predictions-btn" class="btn btn-primary">Get Predictions</button>
+    <div id="message">Waiting to start...</div>
+    <input type="range" min="1" max="100" value="7" class="slider" id="day-slider">
+    <span>Days: </span><span id="day-value">7</span>
+    <div id="chart-container" style="width:100%; height:400px;"></div>
+    <div id="total-revenue">Total revenue: 0</div>
+    <a href="/" class="btn btn-primary">Back to Price Calculator</a>
+    <script>
+    document.getElementById('create-df-btn').addEventListener('click', function() {
+        document.getElementById('message').innerText = 'Training model, please wait...';
+        fetch('/create_df/')
+        .then(response => response.json())
+        .then(data => {
+            console.log(data);
+            document.getElementById('message').innerText = data.message;
+        });
+    });
+
+    function getPredictions(days) {
+        console.log("Getting predictions for " + days + " days...");
+        fetch("/get_predictions/?days=" + days)
+        .then(response => response.json())
+        .then(data => {
+            console.log(data);
+
+            var total_revenue = data.total_revenue;
+            document.getElementById('total-revenue').innerText = 'Total revenue: ' + total_revenue.toFixed(2);
+
+            var dates = data.average_costs.map(function(item) {
+                var date = new Date(item.date);
+                var daysOfWeek = ['Su', 'Mn', 'Tu', 'Wd', 'Th', 'Fr', 'Sa'];
+                var dayOfWeek = daysOfWeek[date.getUTCDay()];
+                return item.date + ' (' + dayOfWeek + ')';
+            });
+
+            var average_costs = data.average_costs.map(function(item) { return item.average_cost; });
+
+            Highcharts.chart('chart-container', {
+                title: {
+                    text: 'Average Taxi Cost Per Day'
+                },
+                xAxis: {
+                    categories: dates
+                },
+                yAxis: {
+                    title: {
+                        text: 'Average Cost'
+                    }
+                },
+                series: [{
+                    name: 'Cost',
+                    data: average_costs
+                }]
+            });
+        });
+    }
+
+    var slider = document.getElementById("day-slider");
+    var dayValue = document.getElementById("day-value");
+
+    slider.addEventListener('input', function() {
+        dayValue.innerHTML = this.value;
+    });
+
+    document.getElementById('get-predictions-btn').addEventListener('click', function() {
+        var days = slider.value;
+        getPredictions(days);  // Get predictions for the selected days
+    });
+    </script>
+</body>
+</html>
